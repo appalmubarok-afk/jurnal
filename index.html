@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jurnal SMP IT Al Mubarok</title>
+  <link rel="icon" id="appIcon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231D3A6E'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-size='28' font-weight='700' text-anchor='middle' fill='white'%3EJD%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -800,6 +802,10 @@ const LOGIN_FORM_WRAP = document.getElementById('loginFormWrap');
 // ===== KONFIGURASI API =====
 // Isi dengan URL Web App Apps Script (Deploy > Manage deployments > Web app URL, berakhiran /exec).
 const API_URL = 'https://script.google.com/macros/s/AKfycbx4FbmGTdpnkpQneafqg1HlzpZpX2BKZFHRYRFALMTJo__eSqtPiP4BLl-HdL7FsEDXEw/exec';
+// ===== JUDUL TAB & FAVICON =====
+// Judul bawaan; setelah setting dimuat otomatis menjadi "Jurnal Digital - <nama sekolah>".
+const APP_NAME = 'Jurnal Digital';
+let HEAD_BASE = APP_NAME;
 let SESSION_TOKEN = '';     // token sesi dari server (dibuat saat login)
 let EKSTRA_TOKEN = '';      // token form jurnal ekstra (halaman login, tanpa akun)
 
@@ -1380,6 +1386,7 @@ $('#backdrop').addEventListener('click', function () {
 
 call('getPublicSettings').then(function (s) {
   SETTINGS = s || {};
+  applyHead_(SETTINGS);
   if (s.nama_sekolah) $('#loginSchoolName').textContent = s.nama_sekolah;
   if (s.logo_url) {
     $('#loginMark').innerHTML = '';
@@ -1413,8 +1420,19 @@ function tryRestoreSession() {
 tryRestoreSession();
 
 // ================== INIT APP ==================
+/** Judul tab: "<Menu> | Jurnal Digital - <Sekolah>". Favicon: logo sekolah bila sudah diunggah di Setting Aplikasi. */
+function judulHalaman_(label) { document.title = (label ? label + ' | ' : '') + HEAD_BASE; }
+function applyHead_(s) {
+  s = s || {};
+  const sekolah = s.nama_sekolah && s.nama_sekolah !== 'Nama Sekolah' ? String(s.nama_sekolah) : '';
+  HEAD_BASE = APP_NAME + (sekolah ? ' - ' + sekolah : '');
+  const cur = (MENU_CONFIG.find(function (m) { return m.key === (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(PAGE_KEY)); }) || {}).label;
+  judulHalaman_(CURRENT_USER ? cur : '');
+  if (s.logo_url) { const ic = document.getElementById('appIcon'); if (ic) ic.href = imgUrl(s.logo_url); }
+}
 /** Terapkan nama sekolah, tahun ajaran & logo ke sidebar (desktop) dan header mobile sekaligus. */
 function applyBranding(s) {
+  applyHead_(s);
   const nama = s.nama_sekolah;
   const tahunTxt = (s.tahun_ajaran || '-') + ' \u00B7 ' + (s.semester || '-');
   if (nama) {
@@ -1495,6 +1513,7 @@ function setActiveMenu(key) {
   });
   const found = MENU_CONFIG.find(function (m) { return m.key === key; });
   $('#pageTitle').textContent = found ? found.label : '';
+  judulHalaman_(found ? found.label : '');
 }
 
 /**
