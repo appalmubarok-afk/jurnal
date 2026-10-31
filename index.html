@@ -777,6 +777,25 @@
     .splash *,.splash-orb,.app-wrap.enter *{animation-duration:.01ms !important;animation-iteration-count:1 !important;animation-delay:0s !important;}
     .splash-check circle,.splash-check path{stroke-dashoffset:0;}
   }
+
+  /* ===== SIDEBAR GLASSY: KONTRAS TEKS DIPERBAIKI ===== */
+  .app-wrap{
+    background:
+      radial-gradient(520px 460px at -4% 8%, rgba(224,155,45,.42), transparent 70%),
+      radial-gradient(460px 460px at 4% 58%, rgba(109,106,201,.45), transparent 70%),
+      radial-gradient(520px 420px at -2% 104%, rgba(59,79,168,.45), transparent 70%),
+      var(--canvas);
+  }
+  .sidebar{
+    background:linear-gradient(165deg,rgba(44,70,122,.80) 0%,rgba(22,45,88,.86) 38%,rgba(10,27,51,.92) 100%);
+    border-color:rgba(255,255,255,.22);
+  }
+  .sidebar-title{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);}
+  .sidebar-title small{color:#D3DDEE;font-weight:600;}
+  .menu-group-title{color:#C3D0E4;font-weight:700;letter-spacing:.01em;}
+  .menu-item{color:#EDF2FA;text-shadow:0 1px 2px rgba(0,0,0,.3);}
+  .menu-item:hover,.menu-item.active{color:#fff;}
+  .menu-item.active{font-weight:700;background:linear-gradient(135deg,rgba(255,255,255,.26),rgba(255,255,255,.12));}
 </style>
 </head>
 <body>
