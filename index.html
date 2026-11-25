@@ -3908,7 +3908,7 @@ function renderNilaiAkademik() {
     title: 'Nilai Akademik',
     subtitle: 'Nilai TP, PAS/PAT, dan nilai rapor siswa per kelas dan mata pelajaran (skala 0 - 100). Kolom TP mengikuti semester aktif.',
     wrapId: 'naWrap',
-    extraButtons: [el('button', { class: 'btn btn-outline', onclick: unduhNilaiAkademik }, [txt('Unduh Excel')])],
+    extraButtons: [el('button', { class: 'btn btn-outline', onclick: unduhNilaiAkademik }, [txt('Unduh Nilai E-Rapor')])],
     filters: [selectFilter('naKelas', 'Pilih kelas', MASTER.rombel), selectFilter('naMapel', 'Pilih mata pelajaran', MASTER.mapel),
       btnFilter(loadNilaiAkademik)]
   });
@@ -3917,8 +3917,8 @@ function renderNilaiAkademik() {
   $('#naWrap').appendChild(el('p', { class: 'muted' }, [txt('Pilih kelas dan mata pelajaran, lalu klik Terapkan.')]));
 }
 /**
- * Nilai rapor = (2 x rerata nilai TP + 1 x nilai PAS/PAT) / 3, dibulatkan.
- * Bobot TP 2x PAS/PAT. Bila salah satu komponen kosong, memakai komponen yang ada saja.
+ * Nilai rapor = (1 x rerata nilai TP + 2 x nilai PAS/PAT) / 3, dibulatkan.
+ * Bobot PAS/PAT 2x TP. Bila salah satu komponen kosong, memakai komponen yang ada saja.
  */
 function hitungRapor(tpVals, pas) {
   const n = tpVals.filter(function (v) { return v !== '' && !isNaN(Number(v)); }).map(Number);
@@ -3927,7 +3927,7 @@ function hitungRapor(tpVals, pas) {
   if (rataTP === null && !adaPas) return '';
   if (rataTP === null) return Math.round(Number(pas));
   if (!adaPas) return Math.round(rataTP);
-  return Math.round((2 * rataTP + Number(pas)) / 3);
+  return Math.round((rataTP + 2 * Number(pas)) / 3);
 }
 /** Hitung rapor dari satu baris tabel nilai akademik (membaca input yang tampil). */
 function raporBaris(tr) {
@@ -3958,7 +3958,7 @@ function loadNilaiAkademik() {
       .concat([el('th', { style: 'text-align:center;' }, [txt('Nilai PAS/PAT')]), el('th', { style: 'text-align:center;' }, [txt('Nilai Rapor')])]));
 
     const body = siswa.map(function (s) {
-      const tr = el('tr', { 'data-nama': s.nama });
+      const tr = el('tr', { 'data-nama': s.nama, 'data-nisn': s.nisn || '' });
       const raporCell = el('td', { class: 'na-rapor', style: 'text-align:center;font-weight:800;' }, [txt('')]);
       const update = function () {
         const r = raporBaris(tr);
@@ -3998,38 +3998,105 @@ function loadNilaiAkademik() {
       wrap.appendChild(legend);
     }
     wrap.appendChild(el('p', { class: 'muted', style: 'margin-top:12px;font-size:13px;' }, [
-      txt('Nilai Rapor = (2 x rerata nilai TP + 1 x nilai PAS/PAT) / 3, dibulatkan (bobot TP 2x PAS/PAT). Bila salah satu kosong, dihitung dari yang terisi. Tekan Enter untuk pindah ke siswa berikutnya.')
+      txt('Nilai Rapor = (1 x rerata nilai TP + 2 x nilai PAS/PAT) / 3, dibulatkan (bobot PAS/PAT 2x TP). Bila salah satu kosong, dihitung dari yang terisi. Tekan Enter untuk pindah ke siswa berikutnya.')
     ]));
     wrap.appendChild(el('div', { style: 'margin-top:14px;' }, [
       el('button', { class: 'btn btn-primary', onclick: function () { simpanNilaiAkademik(kelas, mapel); } }, [txt('Simpan nilai')])
     ]));
   }).catch(errToast);
 }
+/** Library ExcelJS (dimuat saat dibutuhkan) untuk membuat file Excel berformat/berwarna. */
+function ensureExcelJS() {
+  return window.ExcelJS ? Promise.resolve() : loadScript_('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+}
+/** Tingkat ketercapaian TP: T bila nilai > 86 (>= 87), R bila di bawah 87. Kosong bila belum ada nilai. */
+function ketercapaianTP(v) {
+  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return '';
+  return Number(v) >= 87 ? 'T' : 'R';
+}
+/** NISN selalu 10 digit: angka yang kehilangan nol di depan (akibat Sheets) dilengkapi lagi. */
+function formatNisn(v) {
+  v = String(v === undefined || v === null ? '' : v).trim();
+  return /^\d{1,9}$/.test(v) ? ('0000000000' + v).slice(-10) : v;
+}
+/** Unduh nilai format e-rapor: NO | NISN | NAMA SISWA | NILAI RAPOR | TINGKAT KETERCAPAIAN TP (T/R per TP) | VALIDASI NILAI */
 function unduhNilaiAkademik() {
   const trs = $all('#naWrap tbody tr');
   if (!NA_STATE || !trs.length) { showToast('Tampilkan data kelas dan mata pelajaran terlebih dahulu', true); return; }
-  ensureXlsx().then(function () {
-    const tps = NA_STATE.tps;
-    const head = ['No', 'Nama Siswa'].concat(tps.map(function (t, i) { return 'TP ' + (i + 1); })).concat(['Nilai PAS/PAT', 'Nilai Rapor']);
-    const aoa = [['NILAI AKADEMIK'], ['Kelas', NA_STATE.kelas], ['Mata Pelajaran', NA_STATE.mapel], [], head];
-    trs.forEach(function (tr, i) {
-      const num = function (v) { return v === '' ? '' : Number(v); };
-      const row = [i + 1, tr.getAttribute('data-nama')];
-      $all('.na-input', tr).forEach(function (inp) { row.push(num(inp.value)); });
-      row.push(raporBaris(tr));
-      aoa.push(row);
-    });
-    if (tps.length) {
-      aoa.push([], ['Keterangan TP']);
-      tps.forEach(function (t, i) { aoa.push(['TP ' + (i + 1), t.tp]); });
+  ensureExcelJS().then(function () {
+    const tps = NA_STATE.tps, nTP = tps.length;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Nilai E-Rapor');
+    const BIRU = 'FF4F81BD', PUTIH = 'FFFFFFFF';
+    const garis = { style: 'thin', color: { argb: 'FF000000' } };
+    const border = { top: garis, left: garis, bottom: garis, right: garis };
+
+    // kolom: 1 NO, 2 NISN, 3 NAMA, 4 NILAI RAPOR, [5..4+nTP] TP, terakhir VALIDASI
+    const colTP1 = 5, colVal = 5 + nTP;
+    ws.columns = [{ width: 6 }, { width: 14 }, { width: 38 }, { width: 14 }]
+      .concat(tps.map(function () { return { width: 9 }; })).concat([{ width: 14 }]);
+
+    // ---- header 2 baris ----
+    const h1 = ws.getRow(1), h2 = ws.getRow(2);
+    h1.getCell(1).value = 'NO'; h1.getCell(2).value = 'NISN'; h1.getCell(3).value = 'NAMA SISWA'; h1.getCell(4).value = 'NILAI RAPOR';
+    [1, 2, 3, 4].forEach(function (c) { ws.mergeCells(1, c, 2, c); });
+    if (nTP) {
+      h1.getCell(colTP1).value = 'TINGKAT KETERCAPAIAN TP';
+      if (nTP > 1) ws.mergeCells(1, colTP1, 1, colTP1 + nTP - 1);
+      tps.forEach(function (t, i) { h2.getCell(colTP1 + i).value = 'TP.' + (i + 1); });
     }
-    aoa.push([], ['Nilai Rapor = (2 x rerata nilai TP + 1 x nilai PAS/PAT) / 3']);
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 8 }, { wch: 30 }].concat(head.slice(2).map(function () { return { wch: 14 }; }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Nilai Akademik');
-    const aman = function (t) { return String(t).replace(/[^\w\-]+/g, '_'); };
-    XLSX.writeFile(wb, 'nilai-akademik-' + aman(NA_STATE.mapel) + '-' + aman(NA_STATE.kelas) + '.xlsx');
+    h1.getCell(colVal).value = 'VALIDASI';
+    h2.getCell(colVal).value = 'NILAI';
+    for (let r = 1; r <= 2; r++) {
+      for (let c = 1; c <= colVal; c++) {
+        const cell = ws.getRow(r).getCell(c);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BIRU } };
+        cell.font = { bold: true, color: { argb: PUTIH }, size: r === 1 ? 11 : 10 };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = border;
+      }
+    }
+    h1.height = 24; h2.height = 18;
+
+    // ---- isi ----
+    trs.forEach(function (tr, i) {
+      const inputs = $all('.na-input', tr);
+      const val = function (key) {
+        const inp = inputs.filter(function (x) { return x.getAttribute('data-key') === key; })[0];
+        return inp ? inp.value : '';
+      };
+      const rapor = raporBaris(tr);
+      const row = ws.getRow(3 + i);
+      row.getCell(1).value = i + 1;
+      row.getCell(2).value = formatNisn(tr.getAttribute('data-nisn'));
+      row.getCell(2).numFmt = '@';
+      row.getCell(3).value = String(tr.getAttribute('data-nama') || '').toUpperCase();
+      row.getCell(4).value = rapor === '' ? null : rapor;
+      tps.forEach(function (t, k) { row.getCell(colTP1 + k).value = ketercapaianTP(val(t.id)) || null; });
+      for (let c = 1; c <= colVal; c++) {
+        const cell = row.getCell(c);
+        cell.border = border;
+        cell.alignment = { vertical: 'middle', horizontal: (c === 2 || c === 3) ? 'left' : 'center' };
+      }
+    });
+
+    // ---- keterangan ----
+    let r = 3 + trs.length + 1;
+    ws.getCell(r, 1).value = 'Kelas: ' + NA_STATE.kelas + '  |  Mata Pelajaran: ' + NA_STATE.mapel; r++;
+    ws.getCell(r, 1).value = 'Nilai Rapor = (1 x rerata nilai TP + 2 x nilai PAS/PAT) / 3'; r++;
+    ws.getCell(r, 1).value = 'T = nilai TP lebih dari 86 (87 ke atas), R = nilai TP di bawah 87'; r++;
+    tps.forEach(function (t, i) { ws.getCell(r++, 1).value = 'TP.' + (i + 1) + ': ' + t.tp; });
+    ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+    return wb.xlsx.writeBuffer().then(function (buf) {
+      const aman = function (t) { return String(t).replace(/[^\w\-]+/g, '_'); };
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'nilai-e-rapor-' + aman(NA_STATE.mapel) + '-' + aman(NA_STATE.kelas) + '.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    });
   }).catch(errToast);
 }
 function simpanNilaiAkademik(kelas, mapel) {
