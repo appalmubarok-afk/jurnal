@@ -3350,7 +3350,8 @@ function loadPelanggaranPiket() {
         el('td', {}, [txt(r.kelas)]),
         el('td', { style: 'text-align:center;font-weight:700' }, [txt(r.jumlah)]),
         el('td', { class: 'action-btns' }, [
-          el('button', { class: 'btn btn-outline btn-sm', onclick: function () { detailPelanggaranPiket(r); } }, [txt('Detail')])
+          el('button', { class: 'btn btn-outline btn-sm', onclick: function () { detailPelanggaranPiket(r); } }, [txt('Detail')]),
+          el('button', { class: 'btn btn-outline btn-sm', onclick: function (e) { cetakPelanggaranSiswa(r, e.currentTarget); } }, [txt('Cetak')])
         ])
       ];
     });
@@ -3362,6 +3363,106 @@ function detailPelanggaranPiket(r) {
     el('h3', { style: 'margin-top:20px;' }, [txt('Riwayat pelanggaran')]),
     absensiDetailTable(r.rows, ['tanggal', 'nama guru', 'keterangan', 'catatan', 'tindak lanjut'])
   ]));
+}
+
+/** Cetak (PDF, A4 portrait) detail pelanggaran satu siswa sesuai periode yang sedang difilter. */
+function cetakPelanggaranSiswa(r, btn) {
+  const label = btn.textContent;
+  const mulai = function () {
+    btn.disabled = true; btn.textContent = 'Menyiapkan...';
+    loadImageDataUrl(imgUrl(SETTINGS.kop_url)).then(function (kop) {
+      buildPelanggaranSiswaPdf(r, kop, { dari: $('#ppDari') ? $('#ppDari').value : '', sampai: $('#ppSampai') ? $('#ppSampai').value : '' });
+    }).catch(errToast).then(function () { btn.disabled = false; btn.textContent = label; });
+  };
+  if (window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable) { mulai(); return; }
+  btn.disabled = true;
+  ensurePdf().then(function () { btn.disabled = false; mulai(); }).catch(function (e) { btn.disabled = false; errToast(e); });
+}
+function buildPelanggaranSiswaPdf(r, kop, periode) {
+  const jsPDF = window.jspdf.jsPDF;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = 210, pageH = 297, M = 15, cx = pageW / 2;
+  let y = M;
+
+  // Kop: gambar kop bila ada, kalau tidak pakai teks nama & alamat sekolah
+  if (kop) {
+    const w = pageW - 2 * M;
+    const h = Math.min(w * kop.h / kop.w, 35);
+    const iw = Math.min(w, kop.w / kop.h * h);
+    doc.addImage(kop.data, 'JPEG', cx - iw / 2, y, iw, h);
+    y += h + 3;
+  } else {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+    doc.text(String(SETTINGS.nama_sekolah || ''), cx, y + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(String(SETTINGS.alamat_sekolah || ''), cx, y + 11, { align: 'center' });
+    doc.setLineWidth(0.6); doc.line(M, y + 14, pageW - M, y + 14);
+    y += 20;
+  }
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+  doc.text('DETAIL PELANGGARAN SISWA', cx, y + 4, { align: 'center' });
+  y += 12;
+
+  // Identitas siswa
+  const rows = (r.rows || []).slice().sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)); });
+  const ident = [['Nama Siswa', r.nama_siswa], ['Kelas', r.kelas || '-'], ['Jumlah Tercatat', rows.length + ' kali']];
+  if (periode.dari || periode.sampai) {
+    ident.push(['Periode', (periode.dari ? tanggalPanjang(periode.dari) : '...') + ' s.d. ' + (periode.sampai ? tanggalPanjang(periode.sampai) : '...')]);
+  }
+  if (SETTINGS.tahun_ajaran) ident.push(['Tahun Ajaran', SETTINGS.tahun_ajaran + (SETTINGS.semester ? ' - ' + SETTINGS.semester : '')]);
+  doc.setFontSize(10.5);
+  ident.forEach(function (it) {
+    doc.setFont('helvetica', 'normal'); doc.text(it[0], M, y);
+    doc.text(':', M + 36, y);
+    doc.setFont('helvetica', 'bold'); doc.text(String(it[1] || '-'), M + 40, y);
+    y += 6;
+  });
+  y += 2;
+
+  // Tabel riwayat
+  const body = rows.map(function (x, i) {
+    return [i + 1, (x.hari ? x.hari + ', ' : '') + tanggalPanjang(x.tanggal), x['nama guru'] || '', x.keterangan || '', x.catatan || '', x['tindak lanjut'] || ''];
+  });
+  doc.autoTable({
+    head: [['No', 'Hari / Tanggal', 'Guru Piket', 'Keterangan', 'Catatan', 'Tindak Lanjut']], body: body, startY: y,
+    margin: { left: M, right: M, top: M, bottom: 16 },
+    theme: 'grid', showHead: 'everyPage',
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.8, lineColor: [120, 120, 120], lineWidth: 0.1, valign: 'top', textColor: 20 },
+    headStyles: { fillColor: [29, 58, 110], textColor: 255, halign: 'center', valign: 'middle', fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 32 }, 2: { cellWidth: 30 } }
+  });
+
+  // Tanggal & tanda tangan
+  let sy = doc.lastAutoTable.finalY + 10;
+  if (sy + 48 > pageH - 14) { doc.addPage(); sy = M + 6; }
+  const leftX = M + 35, rightX = pageW - M - 35;
+  const kepsek = SETTINGS.nama_kepala_sekolah || '', nipKepsek = SETTINGS.nip_kepala_sekolah || '';
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.text('Mengetahui,', leftX, sy, { align: 'center' });
+  doc.text('Tanggal: ' + tanggalPanjang(todayStr()), rightX, sy, { align: 'center' });
+  doc.text('Kepala Sekolah', leftX, sy + 5, { align: 'center' });
+  doc.text('Guru Piket / Wali Kelas', rightX, sy + 5, { align: 'center' });
+  const nameY = sy + 30;
+  function nameBlock(x, name, sub) {
+    const lb = name || '(............................................)';
+    doc.setFont('helvetica', name ? 'bold' : 'normal');
+    doc.text(lb, x, nameY, { align: 'center' });
+    if (name) { const w = doc.getTextWidth(lb); doc.setLineWidth(0.3); doc.line(x - w / 2, nameY + 0.8, x + w / 2, nameY + 0.8); }
+    doc.setFont('helvetica', 'normal');
+    if (sub) doc.text(sub, x, nameY + 5, { align: 'center' });
+  }
+  nameBlock(leftX, kepsek, nipKepsek ? 'NIP. ' + nipKepsek : '');
+  nameBlock(rightX, '', '');
+
+  const total = doc.getNumberOfPages();
+  doc.setFontSize(8); doc.setTextColor(100);
+  for (let pg = 1; pg <= total; pg++) {
+    doc.setPage(pg);
+    doc.text('Halaman ' + pg + ' dari ' + total, pageW - M, pageH - 7, { align: 'right' });
+  }
+  doc.save('Detail_Pelanggaran_' + String(r.nama_siswa).replace(/[^\w\-]+/g, '_') + '_' + todayStr() + '.pdf');
+  showToast('PDF berhasil dibuat');
 }
 
 function renderBukuTidakHadirSholat() {
@@ -4009,10 +4110,15 @@ function loadNilaiAkademik() {
 function ensureExcelJS() {
   return window.ExcelJS ? Promise.resolve() : loadScript_('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
 }
-/** Tingkat ketercapaian TP: T bila nilai > 86 (>= 87), R bila di bawah 87. Kosong bila belum ada nilai. */
-function ketercapaianTP(v) {
+/** Tingkat ketercapaian TP: T bila nilai >= batas, R bila di bawah batas. Kosong bila belum ada nilai. */
+function ketercapaianTP(v, batas) {
   if (v === '' || v === null || v === undefined || isNaN(Number(v))) return '';
-  return Number(v) >= 87 ? 'T' : 'R';
+  return Number(v) >= batas ? 'T' : 'R';
+}
+const BATAS_TP_KEY = 'jd_batas_tp';
+function batasTPTersimpan() {
+  try { const b = Number(localStorage.getItem(BATAS_TP_KEY)); if (b > 0 && b <= 100) return b; } catch (e) { /* abaikan */ }
+  return 87;
 }
 /** NISN selalu 10 digit: angka yang kehilangan nol di depan (akibat Sheets) dilengkapi lagi. */
 function formatNisn(v) {
@@ -4023,6 +4129,33 @@ function formatNisn(v) {
 function unduhNilaiAkademik() {
   const trs = $all('#naWrap tbody tr');
   if (!NA_STATE || !trs.length) { showToast('Tampilkan data kelas dan mata pelajaran terlebih dahulu', true); return; }
+  const inp = el('input', { type: 'number', min: '1', max: '100', step: '0.01', id: 'batasTpInput' });
+  inp.value = batasTPTersimpan();
+  const lanjut = function () {
+    const b = Number(String(inp.value).replace(',', '.'));
+    if (!inp.value || isNaN(b) || b <= 0 || b > 100) { showToast('Batas nilai harus berupa angka 1 - 100', true); return; }
+    try { localStorage.setItem(BATAS_TP_KEY, String(b)); } catch (e) { /* abaikan */ }
+    closeModal();
+    prosesUnduhNilaiAkademik(b);
+  };
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); lanjut(); } });
+  const body = el('div', {}, [
+    el('div', { class: 'form-group' }, [
+      el('label', { for: 'batasTpInput' }, [txt('Batas nilai tuntas (T)')]),
+      inp,
+      el('p', { class: 'muted', style: 'margin-top:8px;font-size:13px;' }, [
+        txt('Nilai TP sama dengan atau di atas batas ini diisi T, di bawahnya diisi R. Pilihan ini diingat untuk unduhan berikutnya.')
+      ])
+    ])
+  ]);
+  openModal('Unduh Nilai E-Rapor', body, [
+    el('button', { type: 'button', class: 'btn btn-outline', onclick: closeModal }, [txt('Batal')]),
+    el('button', { type: 'button', class: 'btn btn-primary', onclick: lanjut }, [txt('Unduh')])
+  ], true);
+  setTimeout(function () { inp.focus(); inp.select(); }, 50);
+}
+function prosesUnduhNilaiAkademik(batas) {
+  const trs = $all('#naWrap tbody tr');
   ensureExcelJS().then(function () {
     const tps = NA_STATE.tps, nTP = tps.length;
     const wb = new ExcelJS.Workbook();
@@ -4072,7 +4205,7 @@ function unduhNilaiAkademik() {
       row.getCell(2).numFmt = '@';
       row.getCell(3).value = String(tr.getAttribute('data-nama') || '').toUpperCase();
       row.getCell(4).value = rapor === '' ? null : rapor;
-      tps.forEach(function (t, k) { row.getCell(colTP1 + k).value = ketercapaianTP(val(t.id)) || null; });
+      tps.forEach(function (t, k) { row.getCell(colTP1 + k).value = ketercapaianTP(val(t.id), batas) || null; });
       for (let c = 1; c <= colVal; c++) {
         const cell = row.getCell(c);
         cell.border = border;
@@ -4084,7 +4217,7 @@ function unduhNilaiAkademik() {
     let r = 3 + trs.length + 1;
     ws.getCell(r, 1).value = 'Kelas: ' + NA_STATE.kelas + '  |  Mata Pelajaran: ' + NA_STATE.mapel; r++;
     ws.getCell(r, 1).value = 'Nilai Rapor = (1 x rerata nilai TP + 2 x nilai PAS/PAT) / 3'; r++;
-    ws.getCell(r, 1).value = 'T = nilai TP lebih dari 86 (87 ke atas), R = nilai TP di bawah 87'; r++;
+    ws.getCell(r, 1).value = 'T = nilai TP ' + batas + ' ke atas, R = nilai TP di bawah ' + batas; r++;
     tps.forEach(function (t, i) { ws.getCell(r++, 1).value = 'TP.' + (i + 1) + ': ' + t.tp; });
     ws.views = [{ state: 'frozen', ySplit: 2 }];
 
